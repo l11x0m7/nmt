@@ -1,4 +1,4 @@
-# -*- encoding : utf-8 -*-
+# -*- encoding:utf-8 -*-
 
 import tensorflow as tf
 from tensorflow.python.layers import core as layers_core
@@ -8,6 +8,8 @@ import cPickle as pkl
 
 import nltk
 from sklearn.model_selection import train_test_split
+
+import jieba
 
 import sys
 reload(sys)
@@ -37,17 +39,54 @@ cf = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
 cf.gpu_options.per_process_gpu_memory_fraction = 0.4
 
 
+def segment(corpus, tokenizer, savepath=None):
+    """
+    分词
+    """
+    tokenized_corpus = []
+    count = 0
+    tokenized_corpus = ' '.join([_ for _ in tokenizer(corpus) if _.strip(' ')])
+    tokenized_corpus = tokenized_corpus.split(' \n ')
+    # for sentence in corpus:
+    #   count += 1
+    #   tokenized_corpus.append(' '.join(tokenizer(sentence)))
+    #   if count % 1000 == 0:
+    #       print('Finished cutting {}'.format(count))
+    if savepath:
+        with open(savepath, 'w') as fw:
+            pkl.dump(tokenized_corpus, fw)
+    return tokenized_corpus
+
+
 def transform(data, word2id):
+    """
+    把word转成id
+    """
     ret_data = []
     for sentence in data:
         ret_data.append([word2id.get(word, 1) for word in sentence.split()])
     return ret_data
 
+def transform2word(data, id2word):
+    """
+    把id转成word
+    """
+    ret_data = []
+    for sentence in data:
+        ret_data.append(''.join([id2word.get(word, '<UNK>') for word in sentence]))
+    return ret_data
+
 def padding(data, max_len):
+    """
+    零填充
+    """
     return tf.keras.preprocessing.sequence.pad_sequences(data, max_len, padding='post', truncating='post')
 
 
 class Iterator(object):
+    """
+    数据迭代器
+    """
     def __init__(self, x, y):
         self.x = np.asarray(x)
         self.y = np.asarray(y)
@@ -96,6 +135,9 @@ class Iterator(object):
 
 
 class NMTModel(object):
+    """
+    带Attention的NMT模型
+    """
     def __init__(self, 
                  src_max_vocab_size, 
                  tgt_max_vocab_size, 
@@ -112,13 +154,21 @@ class NMTModel(object):
         self.initializer = tf.random_uniform_initializer(
         -0.05, 0.05)
         self.optimizer = optimizer
+        # 源词表大小
         self.src_max_vocab_size = src_max_vocab_size
+        # 目标词表大小
         self.tgt_max_vocab_size = tgt_max_vocab_size
+        # 输入embedding大小（src与tgt的embedding_size可以不同）
         self.embedding_size = embedding_size
+        # 隐层大小
         self.hidden_size = hidden_size
+        # 源序列长度
         self.src_max_seq_len = src_max_seq_len
+        # 目标序列长度
         self.tgt_max_seq_len = tgt_max_seq_len
+        # 目标序列起始id（输入的初始id值）
         self.tgt_start_id = tgt_start_id
+        # 目标的终结id（模型预测到该id后停止预测）
         self.tgt_end_id = tgt_end_id
         if maximum_iterations is None:
             self.maximum_iterations = self.tgt_max_seq_len
@@ -184,6 +234,7 @@ class NMTModel(object):
             projection_layer = layers_core.Dense(
             self.tgt_max_vocab_size, use_bias=False)
 
+        # 训练或评估的时候，decoder的output是真实的target，input是target右移一个词
         with tf.variable_scope('dynamic_decode'):
             # Helper
             helper = tf.contrib.seq2seq.TrainingHelper(
@@ -199,6 +250,7 @@ class NMTModel(object):
             self.logits = outputs.rnn_output
             self.pred = tf.argmax(self.logits, axis=2)
 
+        # 预测的时候，decoder的每个timestep的输入为前一个时刻的输出
         with tf.variable_scope('dynamic_decode', reuse=True):
             # Helper
             helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(
@@ -241,13 +293,16 @@ class NMTModel(object):
 
 
 def bleu(refs, hyps):
+    """
+    计算bleu-4
+    """
     refs = [[[_ for _ in ref if _ > 0]] for ref in refs]
     hyps = [[_ for _ in hyp if _ > 0] for hyp in hyps]
     return nltk.translate.bleu_score.corpus_bleu(refs, hyps)
 
 def train():
     # load data and dictionary
-    with open('data/preprocess/vocab_dict.pkl') as fr:
+    with open('data/preprocess/vocab_dict_and_corpus.pkl') as fr:
         en_word2id, en_id2word, ch_word2id, ch_id2word, \
         train_en_corpus, train_ch_corpus, test_en_corpus, test_ch_corpus = pkl.load(fr)
 
@@ -331,25 +386,51 @@ def evaluate(model, sess, data_iterator):
     print('bleu score:{}, loss:{}'.format(bleu_score, np.mean(loss)))
 
 
-def predict(model, sess, X):
-    # X -> (src_max_seq_len, ) or (batch, sec_max_seq_len, )
-    if len(X.shape) == 1:
-        X = np.expand_dims(X, axis=0)
+def predict(X):
+    with open('data/preprocess/vocab_dict.pkl') as fr:
+        en_word2id, en_id2word, ch_word2id, ch_id2word = pkl.load(fr)
+    if type(X) == str:
+        X = X
+    elif type(x) == list or type(X) == tuple:
+        X = '\n'.join(X)
+    else:
+        raise ValueError('You must ensure the `X` be string or list!')
+    X = segment(X, jieba.cut)
+    X = transform(X, en_word2id)
+    X = padding(X, src_max_seq_len)
     X_len = np.sum((X > 0), axis=1)
-    translations = sess.run(model.translations, 
-                        feed_dict={ model.X:X,
-                                    model.Y_out:Y_out,
-                                    model.Y_in:[[]], 
-                                    model.X_len:X_len,
-                                    model.Y_in_len:[],
-                                    model.Y_out_len:[],
-                                    model.lr:lr,
-                                    model.dropout:0.})
+    # X -> (src_max_seq_len, ) or (batch, sec_max_seq_len, )
+    with tf.Session(config=cf) as sess:
+        model = NMTModel(src_max_vocab_size=src_max_vocab_size, 
+                             tgt_max_vocab_size=tgt_max_vocab_size, 
+                             embedding_size=embedding_size,
+                             hidden_size=hidden_size,
+                             src_max_seq_len=src_max_seq_len,
+                             tgt_max_seq_len=tgt_max_seq_len,
+                             tgt_start_id=tgt_start_id,
+                             tgt_end_id=tgt_end_id,
+                             max_gradient_norm=max_gradient_norm,
+                             maximum_iterations=maximum_iterations,
+                             optimizer=optimizer)
+        saver = tf.train.Saver()
+        saver.restore(sess, tf.train.latest_checkpoint('model/'))
+        translations = sess.run(model.translations, 
+                            feed_dict={ model.X:X,
+                                        model.Y_out:[[]],
+                                        model.Y_in:[[]], 
+                                        model.X_len:X_len,
+                                        model.Y_in_len:[],
+                                        model.Y_out_len:[],
+                                        model.lr:lr,
+                                        model.dropout:0.})
+        translations = transform2word(translations, ch_id2word)
     return translations
 
 
 if __name__ == '__main__':
-    train()
+    # train()
+    src_sent = 'She thinks so, but I am not.'
+    print(predict(src_sent)[0])
 
 
 
