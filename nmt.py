@@ -17,20 +17,21 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
-batch_size = 32
+batch_size = 64
 num_epochs = 20
 lr = 1e-3
+optimizer = 'adam'
 dropout = 0.2
 
 src_max_vocab_size = 60000
-tgt_max_vocab_size = 5000
+tgt_max_vocab_size = 8800
 embedding_size = 128
-hidden_size = 128
+hidden_size = 256
 src_max_seq_len = 40
 tgt_max_seq_len = 40
 tgt_start_id = 2 # <S>
 tgt_end_id = 0 # <PAD>
-max_gradient_norm = 5
+max_gradient_norm = 1.
 maximum_iterations = 40
 cf = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
 cf.gpu_options.per_process_gpu_memory_fraction = 0.4
@@ -105,10 +106,12 @@ class NMTModel(object):
                  tgt_start_id,
                  tgt_end_id,
                  max_gradient_norm=5,
-                 maximum_iterations=None
+                 maximum_iterations=None,
+                 optimizer='adam',
                  ):
         self.initializer = tf.random_uniform_initializer(
         -0.05, 0.05)
+        self.optimizer = optimizer
         self.src_max_vocab_size = src_max_vocab_size
         self.tgt_max_vocab_size = tgt_max_vocab_size
         self.embedding_size = embedding_size
@@ -226,7 +229,12 @@ class NMTModel(object):
         clipped_gradients, _ = tf.clip_by_global_norm(
             gradients, self.max_gradient_norm)
         # Optimization
-        optimizer = tf.train.AdamOptimizer(self.lr)
+        if self.optimizer == 'sgd':
+            optimizer = tf.train.GradientDescentOptimizer(self.lr)
+        elif self.optimizer == 'adadelta':
+            optimizer = tf.train.AdaDeltaOptimizer(self.lr)
+        else:
+            optimizer = tf.train.AdamOptimizer(self.lr)
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
         self.train_op = optimizer.apply_gradients(
             zip(clipped_gradients, params), global_step=self.global_step)
@@ -246,18 +254,20 @@ def train():
     train_en_corpus = padding(train_en_corpus, src_max_seq_len)
     train_ch_corpus = padding(train_ch_corpus, tgt_max_seq_len)
 
-    iter_num = train_en_corpus.shape[0] // batch_size + 1
-
     # truncate the vocabrary
     # for the words exceeded te vocab size, we set it as 1(<UNK>)
     train_en_corpus[train_en_corpus >= src_max_vocab_size] = 1
     train_ch_corpus[train_ch_corpus >= tgt_max_vocab_size] = 1
 
-    train_en_corpus, eval_en_corpus, train_ch_corpus, eval_ch_corpus = train_test_split(train_en_corpus, train_ch_corpus, test_size=0.1, )
+    train_en_corpus, eval_en_corpus, train_ch_corpus, eval_ch_corpus = train_test_split(train_en_corpus, train_ch_corpus, test_size=0.2, )
+
+    print('train size:{}, val size:{}'.format(train_en_corpus.shape, eval_en_corpus.shape))
+
+    iter_num = train_en_corpus.shape[0] // batch_size + 1
 
     data_iterator = Iterator(train_en_corpus, train_ch_corpus)
     eval_data_iterator = Iterator(eval_en_corpus, eval_ch_corpus)
-
+    now_lr = lr
     with tf.Session(config=cf) as sess:
         model = NMTModel(src_max_vocab_size=src_max_vocab_size, 
                          tgt_max_vocab_size=tgt_max_vocab_size, 
@@ -268,7 +278,8 @@ def train():
                          tgt_start_id=tgt_start_id,
                          tgt_end_id=tgt_end_id,
                          max_gradient_norm=max_gradient_norm,
-                         maximum_iterations=maximum_iterations)
+                         maximum_iterations=maximum_iterations,
+                         optimizer=optimizer)
         sess.run(tf.global_variables_initializer())
         saver = tf.train.Saver()
         for epoch in xrange(num_epochs):
@@ -287,11 +298,13 @@ def train():
                                 model.X_len:X_len,
                                 model.Y_in_len:Y_in_len,
                                 model.Y_out_len:Y_out_len,
-                                model.lr:lr,
+                                model.lr:now_lr,
                                 model.dropout:dropout})
-                if iter_n % 1000 == 0:
-                    print('train loss:{}'.format(loss))
-                    evaluate(model, sess, eval_data_iterator)
+                if iter_n % 100 == 0:
+                    print('iter:{}, train loss:{}'.format(iter_n, loss))
+            if optimizer == 'sgd':
+                now_lr = now_lr / 2
+            evaluate(model, sess, eval_data_iterator)
             saver.save(sess,'model/my_model', global_step=global_step)
 
 
