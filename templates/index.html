@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>NMT</title>
+    </head>
+    <body>
+        <div align="center" style="margin-top:80px">
+            <img src=" {{url_for('static', filename='skyhigh.ico') }} " alt="cat" height = "400px" />
+        </div>
+
+        <div align="center" style="margin-top:20px">
+            <form method="POST" name = "form1" height="200px">
+                <input type="text" style="height:100px;width:600px;" name = "eng" placeholder = "请输入英文", value="{{ ENG }}"/>
+                
+                <input type="submit" style="height:120px;width:160px;" value = "翻译"/>
+                
+                <input type="text" style="height:100px;width:600px;" name = "result" placeholder = "此处会显示结果" readonly="readonly" value = "{{ RESULT }}"/>
+
+                
+            </form>
+        </div>
+
+    </body>
+</html>

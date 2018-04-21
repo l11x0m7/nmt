@@ -427,10 +427,68 @@ def predict(X):
     return translations
 
 
+# --- 线上服务 ---
+
+from flask import Flask, request, render_template, jsonify
+
+app = Flask(__name__)
+
+@app.route('/', methods=['GET', 'POST'])
+def online_predict():
+    if request.method == "POST":
+        try:
+            x = request.form['eng']
+            X = segment(x, jieba.cut)
+            X = transform(X, en_word2id)
+            X = padding(X, src_max_seq_len)
+            X_len = np.sum((X > 0), axis=1)
+            translations = sess.run(model.translations, 
+                                feed_dict={ model.X:X,
+                                            model.Y_out:[[]],
+                                            model.Y_in:[[]], 
+                                            model.X_len:X_len,
+                                            model.Y_in_len:[],
+                                            model.Y_out_len:[],
+                                            model.lr:lr,
+                                            model.dropout:0.})
+            translations = transform2word(translations, ch_id2word)
+            return render_template('index.html', ENG=x, RESULT=translations[0])
+        except Exception, e:
+            return jsonify(errcode='error',error=str(e))
+    return render_template('index.html')
+    
+
+def get_dict_model_session():
+    with open('data/preprocess/vocab_dict.pkl') as fr:
+        en_word2id, en_id2word, ch_word2id, ch_id2word = pkl.load(fr)
+    sess = tf.Session(config=cf)
+    with tf.device('/cpu:0'):
+        model = NMTModel(src_max_vocab_size=src_max_vocab_size, 
+                             tgt_max_vocab_size=tgt_max_vocab_size, 
+                             embedding_size=embedding_size,
+                             hidden_size=hidden_size,
+                             src_max_seq_len=src_max_seq_len,
+                             tgt_max_seq_len=tgt_max_seq_len,
+                             tgt_start_id=tgt_start_id,
+                             tgt_end_id=tgt_end_id,
+                             max_gradient_norm=max_gradient_norm,
+                             maximum_iterations=maximum_iterations,
+                             optimizer=optimizer)
+        saver = tf.train.Saver()
+        saver.restore(sess, tf.train.latest_checkpoint('model/'))
+        return model, sess, en_word2id, en_id2word, ch_word2id, ch_id2word
+
 if __name__ == '__main__':
+    # 训练模型
     # train()
-    src_sent = 'She thinks so, but I am not.'
-    print(predict(src_sent)[0])
+
+    # 线下测试
+    # src_sent = 'She thinks so, but I am not.'
+    # print(predict(src_sent)[0])
+
+    # 线上测试
+    model, sess, en_word2id, en_id2word, ch_word2id, ch_id2word = get_dict_model_session()
+    app.run(host='0.0.0.0', port=8899)
 
 
 
