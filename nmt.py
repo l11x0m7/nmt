@@ -479,16 +479,24 @@ def get_dict_model_session():
         return model, sess, en_word2id, en_id2word, ch_word2id, ch_id2word
 
 if __name__ == '__main__':
-    # 训练模型
-    # train()
-
-    # 线下测试
-    # src_sent = 'She thinks so, but I am not.'
-    # print(predict(src_sent)[0])
-
-    # 线上测试
-    model, sess, en_word2id, en_id2word, ch_word2id, ch_id2word = get_dict_model_session()
-    app.run(host='0.0.0.0', port=8899)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train",  help="whether to train", action='store_true')
+    parser.add_argument("--offline_test",  help="whether to test offline", action='store_true')
+    parser.add_argument("--online_test",  help="whether to test online", action='store_true')
+    args = parser.parse_args()
+    if args.train:
+        # 训练模型
+        train()
+    elif args.offline_test:
+        # 线下测试
+        src_sent = 'She thinks so, but I am not.'
+        pred = predict(src_sent)[0]
+        print(src_sent + ' --> ' + pred)
+    elif args.online_test:
+        # 线上测试
+        model, sess, en_word2id, en_id2word, ch_word2id, ch_id2word = get_dict_model_session()
+        app.run(host='0.0.0.0', port=8899)
 
 
 
