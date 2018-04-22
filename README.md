@@ -12,7 +12,7 @@ A seq2seq model for neural machine translation.
 
 `python nmt.py --offline_test`
 
-### test
+### test model online
 
 `python nmt.py --online_test`
 
